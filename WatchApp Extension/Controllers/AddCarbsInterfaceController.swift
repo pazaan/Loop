@@ -9,11 +9,18 @@
 import WatchKit
 import WatchConnectivity
 import HealthKit
+import LoopCore
 import LoopKit
 import os.log
 
 
 final class AddCarbsInterfaceController: WKInterfaceController, IdentifiableClass {
+
+    private enum AbsorptionTimeType {
+        case fast
+        case medium
+        case slow
+    }
 
     private var carbValue: Int = 15 {
         didSet {
@@ -56,13 +63,13 @@ final class AddCarbsInterfaceController: WKInterfaceController, IdentifiableClas
         return formatter
     }()
 
-    private var absorptionTime: AbsorptionTimeType = .medium {
+    private var absorptionTimeType: AbsorptionTimeType = .medium {
         didSet {
             absorptionButtonA.setBackgroundColor(UIColor.darkCarbsColor)
             absorptionButtonB.setBackgroundColor(UIColor.darkCarbsColor)
             absorptionButtonC.setBackgroundColor(UIColor.darkCarbsColor)
 
-            switch absorptionTime {
+            switch absorptionTimeType {
             case .fast:
                 absorptionButtonA.setBackgroundColor(UIColor.carbsColor)
             case .medium:
@@ -72,6 +79,8 @@ final class AddCarbsInterfaceController: WKInterfaceController, IdentifiableClas
             }
         }
     }
+
+    var defaultAbsorptionTimes: CarbStore.DefaultAbsorptionTimes?
 
     @IBOutlet var valueLabel: WKInterfaceLabel!
 
@@ -108,7 +117,8 @@ final class AddCarbsInterfaceController: WKInterfaceController, IdentifiableClas
         crownSequencer.delegate = self
 
         date = Date()
-        absorptionTime = .medium
+        absorptionTimeType = .medium
+        defaultAbsorptionTimes = ExtensionDelegate.shared().loopManager.carbStore.defaultAbsorptionTimes
     }
 
     override func willActivate() {
@@ -161,30 +171,33 @@ final class AddCarbsInterfaceController: WKInterfaceController, IdentifiableClas
     }
 
     @IBAction func setAbsorptionTimeFast() {
-        absorptionTime = .fast
+        absorptionTimeType = .fast
     }
 
     @IBAction func setAbsorptionTimeMedium() {
-        absorptionTime = .medium
+        absorptionTimeType = .medium
     }
 
     @IBAction func setAbsorptionTimeSlow() {
-        absorptionTime = .slow
+        absorptionTimeType = .slow
     }
 
     @IBAction func save() {
         if carbValue > 0 {
-            let entry = CarbEntryUserInfo(value: Double(carbValue), absorptionTimeType: absorptionTime, startDate: date)
+            let entry = CarbEntryUserInfo(carbEntry: self.entry)
 
             do {
                 try WCSession.default.sendCarbEntryMessage(entry,
-                    replyHandler: { (suggestion) in
+                    replyHandler: { (context) in
                         DispatchQueue.main.async {
                             WKInterfaceDevice.current().play(.success)
+                            let loopManager = ExtensionDelegate.shared().loopManager
+                            loopManager.addConfirmedCarbEntry(entry.carbEntry)
+                            loopManager.updateContext(context)
 
-                            ExtensionDelegate.shared().loopManager.addConfirmedCarbEntry(entry)
-
-                            WKExtension.shared().rootInterfaceController?.presentController(withName: BolusInterfaceController.className, context: suggestion)
+                            if let units = context.recommendedBolusDose, units > 0.0 {
+                                WKExtension.shared().rootInterfaceController?.presentController(withName: BolusInterfaceController.className, context: context)
+                            }
                         }
                     },
                     errorHandler: { (error) in
@@ -242,8 +255,25 @@ extension AddCarbsInterfaceController: NSUserActivityDelegate {
             updateUserActivity(userActivity.activityType, userInfo: userActivity.userInfo, webpageURL: nil)
         }
     }
+}
+
+extension AddCarbsInterfaceController {
+    private var absorptionTime: TimeInterval? {
+        guard let defaultTimes = defaultAbsorptionTimes else {
+            return nil
+        }
+
+        switch absorptionTimeType {
+        case .fast:
+            return defaultTimes.fast
+        case .medium:
+            return defaultTimes.medium
+        case .slow:
+            return defaultTimes.slow
+        }
+    }
 
     private var entry: NewCarbEntry {
-        return NewCarbEntry(quantity: HKQuantity(unit: .gram(), doubleValue: Double(carbValue)), startDate: date, foodType: nil, absorptionTime: nil)
+        return NewCarbEntry(quantity: HKQuantity(unit: .gram(), doubleValue: Double(carbValue)), startDate: date, foodType: nil, absorptionTime: absorptionTime, syncIdentifier: UUID().uuidString)
     }
 }
