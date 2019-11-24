@@ -41,12 +41,24 @@ public struct LoopSettings: Equatable {
 
     public let batteryReplacementDetectionThreshold = 0.5
 
+    public let defaultWatchCarbPickerValue = 15 // grams
+
+    public let defaultWatchBolusPickerValue = 1.0 // %
+
     // MARK - Display settings
 
     public let minimumChartWidthPerHour: CGFloat = 50
 
     public let statusChartMinimumHistoryDisplay: TimeInterval = .hours(1)
-
+    
+    public var glucoseUnit: HKUnit? {
+        return glucoseTargetRangeSchedule?.unit
+    }
+    
+    // MARK - Push Notifications
+    
+    public var deviceToken: Data?
+    
     // MARK - Guardrails
 
     public func allowedSensitivityValues(for unit: HKUnit) -> [Double] {
@@ -121,14 +133,16 @@ extension LoopSettings {
     }
 
     public func preMealOverride(beginningAt date: Date = Date(), for duration: TimeInterval) -> TemporaryScheduleOverride? {
-        guard let premealTargetRange = preMealTargetRange else {
+        guard let premealTargetRange = preMealTargetRange, let unit = glucoseUnit else {
             return nil
         }
         return TemporaryScheduleOverride(
             context: .preMeal,
-            settings: TemporaryScheduleOverrideSettings(targetRange: premealTargetRange),
+            settings: TemporaryScheduleOverrideSettings(unit: unit, targetRange: premealTargetRange),
             startDate: date,
-            duration: .finite(duration)
+            duration: .finite(duration),
+            enactTrigger: .local,
+            syncIdentifier: UUID()
         )
     }
 
@@ -137,14 +151,16 @@ extension LoopSettings {
     }
 
     public func legacyWorkoutOverride(beginningAt date: Date = Date(), for duration: TimeInterval) -> TemporaryScheduleOverride? {
-        guard let legacyWorkoutTargetRange = legacyWorkoutTargetRange else {
+        guard let legacyWorkoutTargetRange = legacyWorkoutTargetRange, let unit = glucoseUnit else {
             return nil
         }
         return TemporaryScheduleOverride(
             context: .legacyWorkout,
-            settings: TemporaryScheduleOverrideSettings(targetRange: legacyWorkoutTargetRange),
+            settings: TemporaryScheduleOverrideSettings(unit: unit, targetRange: legacyWorkoutTargetRange),
             startDate: date,
-            duration: duration.isInfinite ? .indefinite : .finite(duration)
+            duration: duration.isInfinite ? .indefinite : .finite(duration),
+            enactTrigger: .local,
+            syncIdentifier: UUID()
         )
     }
 
